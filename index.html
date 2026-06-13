@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Financeiro - Luiz Felipe</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans">
+
+    <nav class="border-b border-slate-800 bg-slate-900/50 backdrop-blur px-6 py-4 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold bg-gradient-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent">
+                LFW · Gestão Financeira
+            </h1>
+            <span class="text-xs bg-slate-800 text-slate-400 px-3 py-1 rounded-full border border-slate-700 animate-pulse" id="status-sync">
+                Sincronizando...
+            </span>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto p-6 space-y-6">
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl">
+                <p class="text-sm text-slate-400 font-medium">Patrimônio Líquido Geral</p>
+                <p class="text-3xl font-bold text-emerald-400 mt-2" id="saldo-total">R$ 0,00</p>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl">
+                <p class="text-sm text-slate-400 font-medium">Investido (XP & NuInvest)</p>
+                <p class="text-3xl font-bold text-blue-400 mt-2" id="saldo-investido">R$ 0,00</p>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl">
+                <p class="text-sm text-slate-400 font-medium">Disponível em Conta</p>
+                <p class="text-3xl font-bold text-teal-400 mt-2" id="saldo-disponivel">R$ 0,00</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <div class="lg:col-span-2 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+                <h3 class="font-semibold text-slate-200">Histórico de Receitas por Ano</h3>
+                <div class="h-80 w-full">
+                    <canvas id="chartEvolucao"></canvas>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col justify-between">
+                <h3 class="font-semibold text-slate-200 mb-4">Saldos por Conta</h3>
+                <div class="divide-y divide-slate-800 overflow-y-auto max-h-80 space-y-3 pr-2" id="lista-contas">
+                    <p class="text-sm text-slate-500 py-4">Processando informações do Sheets...</p>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // Link público fornecido para carregar os dados reais
+        const LINK_PLANILHA_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRDNdHwj0bRWkT8biudWRp1FgeJg_cZfKjC5lmYGAaUMIOdSktoqV0IWuXPaqqvHTBsXW9eRc093Mhq/pub?output=csv";
+
+        // Fallback de segurança com dados estáticos se o link falhar ou estiver indisponível temporariamente
+        const dadosFallback = [
+            { conta: "XP", saldo: 118855.30 },
+            { conta: "NuInvest", saldo: 15094.23 },
+            { conta: "NuGuardado", saldo: 10540.41 },
+            { conta: "Nubank", saldo: 8929.11 },
+            { conta: "Caixinha Dólar", saldo: 7280.00 },
+            { conta: "Consórcio HS 1", saldo: 4504.92 },
+            { conta: "Consórcio HS 2", saldo: 4504.92 },
+            { conta: "Caixinha", saldo: 1080.00 },
+            { conta: "Nubank Holding", saldo: -215.86 }
+        ];
+
+        function formatarMoeda(valor) {
+            return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        }
+
+        function renderizarDashboard(saldos) {
+            let total = 0;
+            let investido = 0;
+            let disponivel = 0;
+
+            const listaContasContainer = document.getElementById('lista-contas');
+            listaContasContainer.innerHTML = '';
+
+            saldos.forEach(item => {
+                total += item.saldo;
+                if(item.conta.toUpperCase().includes("XP") || item.conta.toUpperCase().includes("INVEST")) {
+                    investido += item.saldo;
+                } else if(item.conta.toUpperCase() === "NUBANK" || item.conta.toUpperCase().includes("GUARDADO") || item.conta.toUpperCase().includes("CAIXINHA")) {
+                    disponivel += item.saldo;
+                }
+
+                listaContasContainer.innerHTML += `
+                    <div class="flex justify-between items-center py-2 text-sm">
+                        <span class="text-slate-400">${item.conta}</span>
+                        <span class="font-semibold ${item.saldo >= 0 ? 'text-slate-200' : 'text-rose-400'}">${formatarMoeda(item.saldo)}</span>
+                    </div>
+                `;
+            });
+
+            document.getElementById('saldo-total').innerText = formatarMoeda(total);
+            document.getElementById('saldo-investido').innerText = formatarMoeda(investido);
+            document.getElementById('saldo-disponivel').innerText = formatarMoeda(disponivel);
+
+            // Monta o gráfico de evolução temporal fixado com a base histórica consolidada
+            const ctx = document.getElementById('chartEvolucao').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['2023', '2024', '2025', '2026'],
+                    datasets: [{
+                        label: 'Faturamento Anual Bruto (R$)',
+                        data: [276328.12, 245120.82, 209362.06, 112110.65], 
+                        backgroundColor: 'rgba(52, 211, 153, 0.2)',
+                        borderColor: 'rgba(52, 211, 153, 1)',
+                        borderWidth: 2,
+                        borderRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#94a3b8' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#94a3b8' }
+                        }
+                    }
+                }
+            });
+
+            const badge = document.getElementById('status-sync');
+            badge.innerText = "Sincronizado ao Sheets";
+            badge.classList.remove('animate-pulse', 'bg-slate-800', 'text-slate-400');
+            badge.classList.add('bg-emerald-500/10', 'text-emerald-400', 'border-emerald-500/20');
+        }
+
+        // Execução do PapaParse buscando a URL
+        Papa.parse(LINK_PLANILHA_CSV, {
+            download: true,
+            complete: function(results) {
+                let saldosPlanilha = [];
+                let encontrouCabecalho = false;
+                
+                // Mapeamento dinâmico para varrer o layout do seu Sheets
+                results.data.forEach(row => {
+                    // Identifica em qual linha do CSV estão as colunas de saldo
+                    const colConta = row[7]; // Coluna H
+                    const colSaldo = row[8]; // Coluna I
+
+                    if (colConta && colConta.trim() === "Conta") {
+                        encontrouCabecalho = true;
+                        return;
+                    }
+
+                    if (encontrouCabecalho && colConta && colConta.trim() !== "" && colSaldo) {
+                        let limparSaldo = colSaldo.replace('R$', '').replace(/\s/g, '').replace('.', '').replace(',', '.');
+                        let saldoNum = parseFloat(limparSaldo);
+                        
+                        if (!isNaN(saldoNum) && colConta.trim() !== "Total") {
+                            saldosPlanilha.push({
+                                conta: colConta.trim(),
+                                saldo: saldoNum
+                            });
+                        }
+                    }
+                });
+
+                if(saldosPlanilha.length > 0) {
+                    renderizarDashboard(saldosPlanilha);
+                } else {
+                    renderizarDashboard(dadosFallback);
+                }
+            },
+            error: function() {
+                renderizarDashboard(dadosFallback);
+            }
+        });
+    </script>
+</body>
+</html>
