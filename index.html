@@ -76,7 +76,7 @@
                     </div>
                 </div>
             </div>
-        </section> section>
+        </section>
 
         <section id="tab-fluxo-caixa" class="tab-content hidden space-y-6">
             <div class="bg-slate-900/60 border border-slate-800 p-6 rounded-2xl space-y-4">
@@ -169,12 +169,12 @@
     </main>
 
     <script>
+        // Link público fornecido para carregar os dados reais da sua aba Dashboard
         const LINK_PLANILHA_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRDNdHwj0bRWkT8biudWRp1FgeJg_cZfKjC5lmYGAaUMIOdSktoqV0IWuXPaqqvHTBsXW9eRc093Mhq/pub?output=csv";
 
-        // Variáveis de escopo global para instâncias de gráficos para evitar sobreposição ao renderizar
         let chartInstanceAlocacao = null;
 
-        // Dados base de fallbacks e estruturas estáticas complexas extraídas da análise avançada da planilha
+        // Dados base de fallback caso o Google Sheets demore para responder
         const dadosFallbackSaldos = [
             { conta: "XP", saldo: 118855.30 },
             { conta: "NuInvest", saldo: 15094.23 },
@@ -191,6 +191,24 @@
             return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
         }
 
+        // Função inteligente para tratar formatos numéricos americanos e brasileiros
+        function limparNumero(texto) {
+            if (!texto) return 0;
+            let limpo = texto.replace('R$', '').replace(/\s/g, '');
+            
+            if (limpo.includes(',') && limpo.includes('.')) {
+                limpo = limpo.replace(/\./g, '').replace(',', '.');
+            } else if (limpo.includes(',')) {
+                let partes = limpo.split(',');
+                if (partes[1] && partes[1].length === 2) {
+                    limpo = limpo.replace(',', '.');
+                } else {
+                    limpo = limpo.replace(',', '');
+                }
+            }
+            return parseFloat(limpo) || 0;
+        }
+
         // Controlador do Sistema de Abas Navegáveis
         function switchTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
@@ -203,8 +221,8 @@
             document.getElementById(`btn-${tabId}`).classList.add('bg-slate-800', 'text-emerald-400');
         }
 
-        function buildDashboard(saldos, historicoMeses) {
-            let liquid Cash = 0;
+        function buildDashboard(saldos) {
+            let liquidCash = 0;
             let investido = 0;
             let consorcio = 0;
             const mutuoDudu = 34000;
@@ -220,7 +238,7 @@
                 } else if(item.conta.toUpperCase().includes("CONSÓRCIO")) {
                     consorcio += s;
                 } else {
-                    liquid Cash += s;
+                    liquidCash += s;
                 }
 
                 containerGeral.innerHTML += `
@@ -231,11 +249,11 @@
                 `;
             });
 
-            const patrimonioTotal = liquid Cash + investido + consorcio + mutuoDudu + valorMilhas;
+            const patrimonioTotal = liquidCash + investido + consorcio + mutuoDudu + valorMilhas;
 
             document.getElementById('kpi-patrimonio').innerText = formatarMoeda(patrimonioTotal);
             document.getElementById('kpi-investido').innerText = formatarMoeda(investido);
-            document.getElementById('kpi-liquidez').innerText = formatarMoeda(liquid Cash);
+            document.getElementById('kpi-liquidez').innerText = formatarMoeda(liquidCash);
 
             // Gráfico de Alocação de Ativos Estratégicos
             const ctxAloc = document.getElementById('chartAlocacao').getContext('2d');
@@ -245,7 +263,7 @@
                 data: {
                     labels: ['Liquidez', 'Investimentos', 'Consórcios', 'Mútuo Dudu', 'Milhas'],
                     datasets: [{
-                        data: [liquid Cash, investido, consorcio, mutuoDudu, valorMilhas],
+                        data: [liquidCash, investido, consorcio, mutuoDudu, valorMilhas],
                         backgroundColor: ['#2dd4bf', '#3b82f6', '#8b5cf6', '#fbbf24', '#f43f5e'],
                         borderWidth: 0
                     }]
@@ -295,7 +313,7 @@
                 }
             });
 
-            // Tab 3: Gráfico de Curva de Acúmulo de Longo Prazo (Previdência baseada em Planejamento.csv)
+            // Tab 3: Gráfico de Curva de Acúmulo de Longo Prazo
             const ctxPlan = document.getElementById('chartPlanejamentoLongoPrazo').getContext('2d');
             new Chart(ctxPlan, {
                 type: 'line',
@@ -323,7 +341,7 @@
             });
         }
 
-        // Inicialização via chamada da API pública do Google Sheets
+        // Execução do PapaParse buscando a URL pública do seu Google Sheets
         Papa.parse(LINK_PLANILHA_CSV, {
             download: true,
             complete: function(results) {
@@ -340,8 +358,7 @@
                     }
 
                     if (encontrouCabecalho && colConta && colConta.trim() !== "" && colSaldo) {
-                        let limparSaldo = colSaldo.replace('R$', '').replace(/\s/g, '').replace('.', '').replace(',', '.');
-                        let saldoNum = parseFloat(limparSaldo);
+                        let saldoNum = limparNumero(colSaldo);
                         
                         if (!isNaN(saldoNum) && colConta.trim() !== "Total") {
                             saldosPlanilha.push({
@@ -353,13 +370,13 @@
                 });
 
                 if(saldosPlanilha.length > 0) {
-                    buildDashboard(saldosPlanilha, results.data);
+                    buildDashboard(saldosPlanilha);
                 } else {
-                    buildDashboard(dadosFallbackSaldos, null);
+                    buildDashboard(dadosFallbackSaldos);
                 }
             },
             error: function() {
-                buildDashboard(dadosFallbackSaldos, null);
+                buildDashboard(dadosFallbackSaldos);
             }
         });
     </script>
