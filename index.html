@@ -620,7 +620,10 @@
           expiration: pickValue(row, ['Expiração','expiracao']) || null,
           expiringMiles: toMoney(pickValue(row, ['Milhas Expirando','milhas expirando']) ?? 0)
         };
-      }).filter(x=>x.program || x.value || x.miles);
+      }).filter(x=>{
+        const p = x.program.trim().toLowerCase();
+        return (x.program || x.value || x.miles) && p !== 'total' && p !== 'totais' && !p.startsWith('total ');
+      });
       if(programs.length){
         data.miles = data.miles || {};
         data.miles.programs = programs;
