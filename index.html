@@ -638,13 +638,9 @@
       if(!rows.length && !raw.totalSaldo) return data;
       data.loans = data.loans || {};
       data.loans.items = rows;
-      const apiTotal = toMoney(raw.totalSaldo ?? 0);
-      if(apiTotal) data.loans.currentBalance = apiTotal;
-      else {
-        const total = sumObjects(rows, ['Saldo devedor','saldo','Saldo']);
-        if(total) data.loans.currentBalance = total;
-      }
       if(rows.length){
+        // "Saldo devedor" é o saldo ACUMULADO em cada linha (tipo extrato), não um
+        // valor a somar entre linhas. O saldo atual é o da última linha, não a soma de todas.
         const recentRows = rows.map(row=>{
           const movementRaw = pickValue(row, ['Movimentação','movimento','Movimento']);
           return {
@@ -657,6 +653,7 @@
         }).filter(r=>r.date || Math.abs(r.balance)>0.01);
         if(recentRows.length){
           recentRows.sort((a,b)=>toISODate(a.date).localeCompare(toISODate(b.date)));
+          data.loans.currentBalance = recentRows[recentRows.length-1].balance;
           data.loans.recentRows = recentRows;
         }
       }
