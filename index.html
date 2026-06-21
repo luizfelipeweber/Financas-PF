@@ -428,7 +428,9 @@
       makeChart('chartPayables','doughnut',{labels:payCats.map(x=>x.category),datasets:[{data:payCats.map(x=>x.value),backgroundColor:palette,borderWidth:0}]},{cutout:'60%'});
       setHTML('upcoming-table',`<thead><tr><th>Venc.</th><th>Descrição</th><th>Categoria</th><th class="right">Valor</th></tr></thead><tbody>${(data.payables.upcoming||[]).map(x=>`<tr><td>${fmtBR(x.dueDate)}</td><td>${x.description}</td><td>${x.category}</td><td class="right">${brl(x.value)}</td></tr>`).join('')}</tbody>`);
       const cards = data.creditCards.history || [];
-      makeChart('chartCards','bar',{labels:cards.map(x=>x.month),datasets:[{label:'XP',data:cards.map(x=>x.xp),backgroundColor:'rgba(59,130,246,.72)',borderRadius:6},{label:'Nubank',data:cards.map(x=>x.nubank),backgroundColor:'rgba(139,92,246,.72)',borderRadius:6}]},{scales:{x:{stacked:true,ticks:{color:'#94a3b8'}},y:{stacked:true,ticks:{color:'#94a3b8',callback:v=>brl(v)}}}});
+      const cardNames = (data.creditCards.cardNames && data.creditCards.cardNames.length) ? data.creditCards.cardNames : ['xp','nubank'];
+      const cardLabels = {xp:'XP', nubank:'Nubank'};
+      makeChart('chartCards','bar',{labels:cards.map(x=>x.month),datasets:cardNames.map((name,i)=>({label:cardLabels[name]||name, data:cards.map(x=>x[name]||0), backgroundColor:palette[i%palette.length], borderRadius:6}))},{scales:{x:{stacked:true,ticks:{color:'#94a3b8'}},y:{stacked:true,ticks:{color:'#94a3b8',callback:v=>brl(v)}}}});
       const real = data.accounts.filter(a=>['Ativos reais','Consórcios'].includes(classifyAccount(a.name)) && Math.abs(a.balance)>0.01);
       setHTML('real-assets-table',`<thead><tr><th>Ativo</th><th>Classe</th><th class="right">Valor</th><th class="right">% PL</th></tr></thead><tbody>${real.map(a=>`<tr><td>${a.name}</td><td><span class="tag">${classifyAccount(a.name)}</span></td><td class="right">${brl(a.balance)}</td><td class="right">${pct(a.balance/m.netWorth)}</td></tr>`).join('')}</tbody>`);
     }
@@ -566,7 +568,10 @@
           const value = toMoney(pickValue(row, ['valor','Valor','value']) ?? 0);
           if(!year) return;
           const idx = monthNumber(month);
-          if(!annualByYear[year]) annualByYear[year] = {year, revenue:0, expense:0, result:0, cashGap:0, avgRevenue:0, avgResult:0, avgSavingsRate:0, monthly:Array.from({length:12},(_,i)=>({month:months[i],revenue:0,expense:0,result:0,isFuture:false}))};
+          if(!annualByYear[year]){
+            const now = new Date();
+            annualByYear[year] = {year, revenue:0, expense:0, result:0, cashGap:0, avgRevenue:0, avgResult:0, avgSavingsRate:0, monthly:Array.from({length:12},(_,i)=>({month:months[i],revenue:0,expense:0,result:0,isFuture: year>now.getFullYear() || (year===now.getFullYear() && i>now.getMonth())}))};
+          }
           if(idx !== null){
             if(key === 'revenue') annualByYear[year].monthly[idx].revenue = value;
             if(key === 'expense') annualByYear[year].monthly[idx].expense = value;
@@ -629,6 +634,22 @@
         const total = sumObjects(rows, ['saldo','Saldo','saldo atual','Saldo Atual','valor','Valor','total','Total']);
         if(total) data.loans.currentBalance = total;
       }
+      if(rows.length){
+        const recentRows = rows.map(row=>{
+          const movementRaw = pickValue(row, ['movimento','Movimento','movimentacao','Movimentação']);
+          return {
+            date: pickValue(row, ['data','Data']) || '',
+            interest: toMoney(pickValue(row, ['juros','Juros','interest']) ?? 0),
+            movement: (movementRaw===undefined || movementRaw===null || movementRaw==='') ? null : toMoney(movementRaw),
+            balance: toMoney(pickValue(row, ['saldo','Saldo','saldo atual','Saldo Atual']) ?? 0),
+            note: pickValue(row, ['observacao','Observação','obs','Obs','nota','Nota']) || ''
+          };
+        }).filter(r=>r.date || Math.abs(r.balance)>0.01);
+        if(recentRows.length){
+          recentRows.sort((a,b)=>toISODate(a.date).localeCompare(toISODate(b.date)));
+          data.loans.recentRows = recentRows;
+        }
+      }
       return data;
     }
     function adaptPayablesReceivablesFromApi(api, data){
@@ -639,7 +660,29 @@
         data.payables.items = payRows;
         const open = sumObjects(payRows, ['valor','Valor','saldo','Saldo','total','Total','valor aberto','Valor Aberto']);
         if(open) data.payables.openTotal = open;
-        data.payables.next30 = open;
+        data.payables.openCount = payRows.length;
+
+        const categoryTotals = {};
+        payRows.forEach(row=>{
+          const cat = String(pickValue(row, ['categoria','Categoria']) || 'Outros').trim() || 'Outros';
+          const val = toMoney(pickValue(row, ['valor','Valor','saldo','Saldo','valor aberto','Valor Aberto']) ?? 0);
+          categoryTotals[cat] = (categoryTotals[cat]||0) + val;
+        });
+        data.payables.byCategory = Object.entries(categoryTotals).map(([category,value])=>({category,value})).sort((a,b)=>b.value-a.value);
+
+        const todayIso = new Date().toISOString().slice(0,10);
+        const in30Iso = new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+        const upcoming = payRows.map(row=>({
+          dueDate: pickValue(row, ['vencimento','Vencimento','data','Data']) || '',
+          description: pickValue(row, ['descricao','Descrição','descrição','item','Item']) || 'Pagamento',
+          category: pickValue(row, ['categoria','Categoria']) || 'Outros',
+          value: toMoney(pickValue(row, ['valor','Valor','saldo','Saldo','valor aberto','Valor Aberto']) ?? 0)
+        })).filter(u => { const iso = toISODate(u.dueDate); return iso && iso >= todayIso; })
+          .sort((a,b)=>toISODate(a.dueDate).localeCompare(toISODate(b.dueDate)));
+        data.payables.upcoming = upcoming.slice(0,15);
+        const next30 = sum(upcoming.filter(u=>toISODate(u.dueDate) <= in30Iso), u=>u.value);
+        data.payables.next30 = next30;
+        data.payables.currentMonth = next30;
       }
       if(recRows.length){
         data.receivables = data.receivables || {};
@@ -649,14 +692,33 @@
       }
       const faturas = asArray(api.faturas);
       if(faturas.length){
-        data.cards = data.cards || {};
-        data.cards.invoices = faturas.map(row=>({
-          card: pickValue(row, ['cartao','Cartão','banco','Banco','nome','Nome']) || 'Cartão',
-          dueDate: pickValue(row, ['vencimento','Vencimento','data','Data']) || '',
-          value: toMoney(pickValue(row, ['valor','Valor','total','Total','fatura','Fatura']) ?? 0),
-          status: pickValue(row, ['status','Status']) || '',
-          raw: row
-        })).filter(x=>x.value || x.card);
+        const byMonth = {};
+        const cardNamesSet = new Set();
+        faturas.forEach(row=>{
+          const card = String(pickValue(row, ['cartao','Cartão','banco','Banco','nome','Nome']) || 'Cartão').trim();
+          cardNamesSet.add(card);
+          const due = pickValue(row, ['vencimento','Vencimento','data','Data']) || '';
+          const value = toMoney(pickValue(row, ['valor','Valor','total','Total','fatura','Fatura']) ?? 0);
+          const iso = toISODate(due);
+          const monthKey = iso ? iso.slice(0,7) : `sem-data-${card}`;
+          if(!byMonth[monthKey]) byMonth[monthKey] = {sortKey: iso || '9999', month: iso ? shortDate(due, true) : (due || monthKey), cards:{}};
+          byMonth[monthKey].cards[card] = (byMonth[monthKey].cards[card] || 0) + value;
+        });
+        const history = Object.values(byMonth).sort((a,b)=>a.sortKey.localeCompare(b.sortKey)).map(m=>({
+          month: m.month, ...m.cards, total: sum(Object.values(m.cards))
+        }));
+        if(history.length){
+          data.creditCards = data.creditCards || {};
+          data.creditCards.history = history;
+          data.creditCards.cardNames = Array.from(cardNamesSet);
+          const last = history[history.length - 1];
+          const lastCardEntries = Object.entries(last).filter(([k])=>!['month','total'].includes(k));
+          const topCard = lastCardEntries.sort((a,b)=>b[1]-a[1])[0];
+          if(topCard){
+            data.creditCards.selectedCard = topCard[0];
+            data.creditCards.selectedValue = topCard[1];
+          }
+        }
       }
       return data;
     }
